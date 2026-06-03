@@ -76,6 +76,16 @@
       "priority": 4
     },
     {
+      "name": "DTC_SW_INIT_FAIL",
+      "number": "0x008000",
+      "destination": [
+        "Primary",
+        "Mirror"
+      ],
+      "priority": 6,
+      "OperationCycleRef": "IGNITION"
+    },
+    {
       "name": "DTC_COMB0",
       "number": "0x112205",
       "destination": [

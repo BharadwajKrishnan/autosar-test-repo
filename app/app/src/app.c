@@ -19,13 +19,18 @@
 #if defined(_WIN32) || defined(linux)
 #include <assert.h>
 #endif
+#if defined(USE_DEM)
+#include "Dem.h"
+#include "Dem_Cfg.h"
+#endif
 /* ================================ [ MACROS    ] ============================================== */
 #define AS_LOG_APP 0
 /* ================================ [ TYPES     ] ============================================== */
 /* ================================ [ DECLARES  ] ============================================== */
 #if defined(__HIWARE__)
 #else
-void __weak User_Init(void) {
+Std_ReturnType __weak User_Init(void) {
+  return E_OK;
 }
 void __weak User_MainTask10ms(void) {
 }
@@ -82,7 +87,13 @@ static void appCheckComRxMsg(void) {
 #endif
 /* ================================ [ FUNCTIONS ] ============================================== */
 void App_Init(void) {
-  User_Init();
+  Std_ReturnType ret = User_Init();
+#if defined(USE_DEM)
+  if (E_NOT_OK == ret) {
+    Dem_SetOperationCycleState(DEM_OPERATION_CYCLE_IGNITION, DEM_OPERATION_CYCLE_STARTED);
+    Dem_SetEventStatus(DEM_EVENT_ID_DTC_SW_INIT_FAIL, DEM_EVENT_STATUS_FAILED);
+  }
+#endif
   Std_TimerInit(&timer10ms, 10000);
   Std_TimerInit(&timer1s, 1000000);
 }
