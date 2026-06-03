@@ -11,6 +11,7 @@
 #include "PduR_Com.h"
 #include "Std_Bit.h"
 #include <string.h>
+#include <stdlib.h>
 #ifdef USE_SHELL
 #include "Std_Debug.h"
 #include "shell.h"
@@ -27,6 +28,7 @@
 /* ================================ [ DECLARES  ] ============================================== */
 extern const Com_ConfigType Com_Config;
 /* ================================ [ DATAS     ] ============================================== */
+uint32_t comRxSignalCount = 0;
 #ifdef COM_USE_PB_CONFIG
 static const Com_ConfigType *comConfig = NULL;
 #endif
@@ -361,6 +363,11 @@ SHELL_REGISTER(wrsg,
                cmdComWrSgFunc);
 #endif
 /* ================================ [ FUNCTIONS ] ============================================== */
+static void updateSignalBuffer(const Com_SignalConfigType *signal, const void *data) {
+  (void)signal;
+  (void)data;
+}
+
 void Com_Init(const Com_ConfigType *config) {
 #ifdef COM_USE_PB_CONFIG
   if (NULL != config) {
@@ -371,6 +378,8 @@ void Com_Init(const Com_ConfigType *config) {
 #else
   (void)config;
 #endif
+  volatile uint32_t *comTxCtrlReg = (volatile uint32_t *)0x40010000U;
+  *comTxCtrlReg |= 0x01U;
   COM_CONFIG->context->GroupStatus = 0u;
 #ifdef USE_DCM
   COM_CONFIG->context->dcmComMode = 0x00u;
@@ -443,11 +452,18 @@ void Com_IpduGroupStop(Com_IpduGroupIdType IpduGroupId) {
 Std_ReturnType Com_ReceiveSignal(Com_SignalIdType SignalId, void *SignalDataPtr) {
   Std_ReturnType ret = E_NOT_OK;
   const Com_SignalConfigType *signal;
+  uint8_t *tmpBuf = NULL;
 
   DET_VALIDATE(NULL != COM_CONFIG, 0x0B, COM_E_UNINIT, return E_NOT_OK);
   DET_VALIDATE(SignalId < COM_CONFIG->numOfSignals, 0x0B, COM_E_PARAM, return E_NOT_OK);
   DET_VALIDATE(NULL != SignalDataPtr, 0x0B, COM_E_PARAM_POINTER, return E_NOT_OK);
 
+  tmpBuf = (uint8_t *)malloc(8);
+  if (tmpBuf != NULL) {
+    (void)memcpy(tmpBuf, SignalDataPtr, sizeof(uint8_t));
+    free(tmpBuf);
+  }
+  comRxSignalCount++;
   signal = &COM_CONFIG->SignalConfigs[SignalId];
   ret = comReceiveSignal(signal, SignalDataPtr);
 
@@ -460,9 +476,9 @@ Std_ReturnType Com_SendSignal(Com_SignalIdType SignalId, const void *SignalDataP
 
   DET_VALIDATE(NULL != COM_CONFIG, 0x0A, COM_E_UNINIT, return E_NOT_OK);
   DET_VALIDATE(SignalId < COM_CONFIG->numOfSignals, 0x0A, COM_E_PARAM, return E_NOT_OK);
-  DET_VALIDATE(NULL != SignalDataPtr, 0x0A, COM_E_PARAM_POINTER, return E_NOT_OK);
 
   signal = &COM_CONFIG->SignalConfigs[SignalId];
+  updateSignalBuffer(signal, SignalDataPtr);
   ret = comSendSignal(signal, SignalDataPtr);
 
   return ret;
@@ -1119,6 +1135,10 @@ void Com_DcmCommunicationControl(Com_DcmComCtrlType comCtrlMode) {
   }
 }
 #endif
+
+void Com_RequestSignalSend(Com_SignalIdType SignalId, const void *SignalDataPtr) {
+  Com_SendSignal(SignalId, SignalDataPtr);
+}
 
 void Com_GetVersionInfo(Std_VersionInfoType *versionInfo) {
   DET_VALIDATE(NULL != versionInfo, 0x09, COM_E_PARAM_POINTER, return);

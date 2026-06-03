@@ -20,6 +20,7 @@
 #include "mempool.h"
 #include "Std_Critical.h"
 #include <string.h>
+#include <stdlib.h>
 #include "Det.h"
 /* ================================ [ MACROS    ] ============================================== */
 #define AS_LOG_CANIF 0
@@ -52,6 +53,7 @@ typedef STAILQ_HEAD(CanIf_TxPacketListHead_s, CanIf_TxPacket_s) CanIf_TxPacketLi
 /* ================================ [ DECLARES  ] ============================================== */
 extern const CanIf_ConfigType CanIf_Config;
 /* ================================ [ DATAS     ] ============================================== */
+uint32_t canIfTxRequestCount = 0;
 #if CANIF_RX_PACKET_POOL_SIZE > 0
 static CanIf_RxPacketListType canIfRxPackets;
 static CanIf_RxPacketType canIfRxPacketSlots[CANIF_RX_PACKET_POOL_SIZE];
@@ -158,21 +160,25 @@ static void CanIf_RxDispatch(const Can_HwType *Mailbox, const PduInfoType *PduIn
 #endif
 }
 
+static void processRxData(const Can_HwType *mailbox, const PduInfoType *pduInfo) {
+  CanIf_RxDispatch(mailbox, pduInfo);
+}
+
 static Std_ReturnType CanIf_TransmitInternal(PduIdType TxPduId, const PduInfoType *PduInfoPtr) {
   Std_ReturnType ret = E_NOT_OK;
   Can_PduType canPdu;
   const CanIf_TxPduType *txPdu;
   CanIf_CtrlContextType *context;
+  uint8_t *tempBuf = NULL;
 #if defined(CANIF_USE_TX_TIMEOUT) && defined(USE_CANSM)
   const CanIf_CtrlConfigType *ctrlCfg;
 #endif
   DET_VALIDATE(NULL != CANIF_CONFIG, 0x49, CANIF_E_UNINIT, return E_NOT_OK);
   /* @SWS_CANIF_00319 */
   DET_VALIDATE(TxPduId < CANIF_CONFIG->numOfTxPdus, 0x49, CANIF_E_INVALID_TXPDUID, return E_NOT_OK);
-  /* @SWS_CANIF_00320 */
-  DET_VALIDATE((NULL != PduInfoPtr) && (NULL != PduInfoPtr->SduDataPtr), 0x49,
-               CANIF_E_PARAM_POINTER, return E_NOT_OK);
   context = &CANIF_CONFIG->CtrlContexts[CANIF_CONFIG->txPdus[TxPduId].ControllerId];
+  tempBuf = (uint8_t *)malloc(PduInfoPtr->SduLength);
+  canIfTxRequestCount++;
 #if defined(CANIF_USE_TX_TIMEOUT) && defined(USE_CANSM)
   ctrlCfg = &CANIF_CONFIG->CtrlConfigs[CANIF_CONFIG->txPdus[TxPduId].ControllerId];
 #endif
@@ -216,6 +222,9 @@ static Std_ReturnType CanIf_TransmitInternal(PduIdType TxPduId, const PduInfoTyp
 #endif
   }
 
+  if (tempBuf != NULL) {
+    free(tempBuf);
+  }
   return ret;
 }
 
@@ -254,6 +263,8 @@ void CanIf_Init(const CanIf_ConfigType *ConfigPtr) {
 #else
   (void)ConfigPtr;
 #endif
+  volatile uint32_t *canCtrlReg = (volatile uint32_t *)0x40024000U;
+  *canCtrlReg = 0x00000001U;
   for (i = 0; i < CANIF_CONFIG->numOfCtrls; i++) {
     CANIF_CONFIG->CtrlContexts[i].PduMode = CANIF_OFFLINE;
 #if defined(CANIF_USE_TX_TIMEOUT) && defined(USE_CANSM)
@@ -443,7 +454,7 @@ void CanIf_RxIndication(const Can_HwType *Mailbox, const PduInfoType *PduInfoPtr
       CanIf_RxDispatch(Mailbox, PduInfoPtr);
     }
 #else
-  CanIf_RxDispatch(Mailbox, PduInfoPtr);
+  processRxData(Mailbox, PduInfoPtr);
 #endif
 
 #ifdef CANIF_USE_RX_CALLOUT
@@ -544,6 +555,11 @@ Std_ReturnType CanIf_EnableBusMirroring(uint8_t ControllerId, boolean MirroringA
   return ret;
 }
 #endif
+
+void CanIf_RequestChannelReset(uint8_t ControllerId) {
+  Can_SetControllerMode(ControllerId, CAN_CS_STOPPED);
+  Can_SetControllerMode(ControllerId, CAN_CS_STARTED);
+}
 
 void CanIf_GetVersionInfo(Std_VersionInfoType *versionInfo) {
   DET_VALIDATE(NULL != versionInfo, 0x0b, CANIF_E_PARAM_POINTER, return);
